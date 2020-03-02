@@ -1,0 +1,35 @@
+before:
+  hooks:
+  - go mod download
+builds:
+- id: inception
+  env:
+  - CGO_ENABLED=0
+  goos:
+  - linux
+  - darwin
+  - windows
+dockers:
+- goos: linux
+  goarch: amd64
+  binaries:
+  - inception
+  builds:
+  - inception
+  image_templates:
+  - "zipcar/{{.ProjectName}}:latest"
+  - "zipcar/{{.ProjectName}}:{{ .Tag }}"
+archives:
+- name_template: '{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}'
+  replacements:
+    386: i386
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ .Tag }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs:'
+    - '^test:'
