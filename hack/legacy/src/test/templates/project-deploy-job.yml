@@ -1,0 +1,10 @@
+jobs:
+- name: ${JOB_NAME}
+  plan:
+  - in_parallel:
+    - get: ${PROJECT_RESOURCE_NAME}            # used to trigger a deploy after a
+      passed: [${DEPLOY_REQUIRES_PASSING_JOB}] # build. without this we would only
+      trigger: ${BUILD_TRIGGERS_DEPLOY}        # deploy on config changes.
+
+    - get: ${PROJECT_NAME}-${DEPLOYMENT_NAME} # used to trigger a deploy when
+      trigger: true                           # files affecting config change

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+ROOT_PATH="${SCRIPT_PATH}/../../../../"
+LIB_PATH="${SCRIPT_PATH}/../../src/lib"
+CMD_PATH="${SCRIPT_PATH}/../../src/cmd"
+
+. ${CMD_PATH}/render-pipeline
+
+function render-test-pipeline {
+  CONFIGFILE_NAME="Inceptionfile" \
+  TEMPLATES_PATH="${ROOT_PATH}/projects/ci-inception/test/templates" \
+  ENVIRONMENT_NAME=dev \
+  CACHING_ENABLED=false \
+  STAGES_ENABLED=build,deploy \
+  TASKS_PATH="projects/ci-inception/test/fixtures/projects/shared/tasks" \
+  PIPELINE_CAN_REWRITE_ITSELF=true \
+  TAG_DEPLOYED_CONTAINERS_WITH=latest-build \
+  TAG_BUILT_CONTAINERS_AS_LATEST=false
+  PROJECTS_PATH="projects/ci-inception/test/fixtures/projects" \
+  REGISTRY_BASE=your-registry-host.example.org/your-registry-prefix \
+  REGISTRY_AWS_ACCOUNT_ID=123456789 \
+  CLUSTER_HOST=https://your-eks-host.example.org \
+  CLUSTER_NAME=test-eks \
+    render-pipeline
+}
+
+function findJob {
+  jq -r ".jobs[] | select(.name == \"${1}\") | .name"
+}
+
+# start render-pipeline testing
+function test:render-pipeline {
+  assert_status_code 1 render-pipeline "missing all config"
+
+  # TEST EPHEMERAL-BRANCH-BASED PIPELINE
+  ephemeral=$(DEPLOYMENT_NAME=ephemeral BRANCH_NAME=project-123 render-test-pipeline)
+
+  assert_equals 'build-wip-buildable-deployable|build-wip-buildable-only|curate-pipeline|deploy-wip-buildable-deployable|e2e-test|initialize-ephemeral-environment|task-one|task-two|' \
+    "$(echo "${ephemeral}" | jq -rc '.jobs[].name' | sort | tr '\n' '|')" \
+    "all expected ephemeral jobs are present"
+
+  # pending https://github.com/concourse/concourse/issues/4949
+  # assert_equals 'deploy-wip-buildable-deployable|' \
+  #   "$(echo "${ephemeral}" | jq -rc '.jobs[] | select(.name == "test") | .passed[]' | tr '\n' '|')" \
+  #   "the fan in test job can depend on the successful deployment of all deployable projects"
+
+  # TEST MASTER-BASED PIPELINE
+  master=$(PROMOTE_TO_ENVIRONMENT_NAME=preprod DEPLOYMENT_NAME=dev BRANCH_NAME=master render-test-pipeline)
+
+  assert_equals 'build-not-wip-buildable-deployable-itestable|build-wip-buildable-deployable|build-wip-buildable-not-deployable|build-wip-buildable-only|curate-pipeline|deploy-not-wip-buildable-deployable-itestable|deploy-wip-buildable-deployable|e2e-test|initialize-dev-environment|task-one|task-two|test-wip-testable-only|' \
+    "$(echo "${master}" | jq -rc '.jobs[].name' | sort | tr '\n' '|')" \
+    "all expected master jobs are present"
+}

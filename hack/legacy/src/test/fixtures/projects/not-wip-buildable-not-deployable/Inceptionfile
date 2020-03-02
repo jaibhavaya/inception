@@ -1,0 +1,7 @@
+project:
+  name: wip-buildable-not-deployable
+  commands:
+    build: make
+  triggers:
+    build:
+    - Makefile

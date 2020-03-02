@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# This introspects a defined folder, locating all tasks
+set -ueo pipefail
+
+function taskList {
+  # Make sure the env variables we need are defined.
+  : ${ROOT_PATH} ${TASKS_PATH?}
+  find ${ROOT_PATH}/${TASKS_PATH} -mindepth 1 -maxdepth 2 -type f -exec basename {} \;
+}

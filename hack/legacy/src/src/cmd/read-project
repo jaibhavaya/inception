@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# read data from a project's configuration file
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+LIB_PATH="${SCRIPT_PATH}/../lib"
+
+. ${LIB_PATH}/projectList
+. ${LIB_PATH}/projectModel
+. ${LIB_PATH}/utils
+
+function read-project {
+  if [[ "$#" -lt 2 ]]; then
+    if [[ "$#" -lt 1 ]]; then
+      >&2 echo "Usage: read-project <project-path> <getter>"
+      >&2 echo "Project Paths:" #
+      # indented list of all projects to read data about
+      projectList | while read project; do
+        echo $(relpath $PWD $project) | sed 's/^/  /'
+      done
+    else
+      >&2 echo "Usage: read-project $1 <getter>"
+    fi
+    >&2 echo "Getters:"
+    # indented list of all functions prefixed with "get", aka model functions
+    functionList | grep "get" | sed 's/^/  /' | sort
+    exit 1
+  else
+    export PROJECT_PATH=$1
+    projectModel | $2
+  fi
+}

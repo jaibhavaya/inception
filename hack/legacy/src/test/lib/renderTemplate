@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+LIB_PATH="${SCRIPT_PATH}/../../src/lib"
+
+. ${LIB_PATH}/renderTemplate
+
+# Create temporary directory test with.
+TEMPLATES_PATH=$(mktemp -d)
+# Create testing fixture template.
+echo '${IN_ONE}|${NOT_IN}|${IN_TWO}' > ${TEMPLATES_PATH}/fixture.yml
+
+if [[ ! -e ${TEMPLATES_PATH} ]]; then
+  >&2 echo "Failed to create temp directory (${TEMPLATES_PATH})."
+  exit 1
+fi
+# Ensure we cleanup after ourselves.
+trap "exit 1" HUP INT PIPE QUIT TERM
+trap 'rm -rf "$TEMPLATES_PATH"' EXIT
+
+function renderTemplateMissing {
+  renderTemplate missing.yml
+}
+
+function renderTemplateMissingContext {
+  renderTemplate fixture.yml
+}
+
+function test:renderTemplate {
+  assert_status_code 1 renderTemplate "missing all config"
+  assert_status_code 1 renderTemplateMissing "when template cannot be found"
+  #assert_status_code 1 renderTemplateMissingContext "when context cannot be found"
+
+  assert_equals \
+    'first|${NOT_IN}|second' \
+    "$(IN_ONE=first NOT_IN=ignored IN_TWO=second renderTemplate "IN_ONE IN_TWO" fixture.yml)" \
+    "template context is replaced"
+
+  assert_equals \
+    'first|middle|second' \
+    "$(IN_ONE=first NOT_IN=middle IN_TWO=second renderTemplate "IN_ONE NOT_IN IN_TWO" fixture.yml)" \
+    "template context is replaced"
+}

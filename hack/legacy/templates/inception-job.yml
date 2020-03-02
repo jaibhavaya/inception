@@ -1,0 +1,60 @@
+jobs:
+- ((append))
+- name: ${JOB_NAME}
+  on_failure:
+    put: slack-notify
+    params:
+      alert_type: failed
+  plan:
+  - get: ${BRANCH_NAME}
+    trigger: true
+  - task: ${JOB_NAME}
+    config:
+      inputs:
+      - name: ${BRANCH_NAME}
+      outputs:
+      - name: concourse
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+      params:
+        BRANCH_NAME: ${BRANCH_NAME}
+        STAGES_ENABLED: ${STAGES_ENABLED}
+        DEPLOYMENT_NAME: ${DEPLOYMENT_NAME}
+        ENVIRONMENT_NAME: ${ENVIRONMENT_NAME}
+        CACHING_ENABLED: ${CACHING_ENABLED}
+        TAG_DEPLOYED_CONTAINERS_WITH: ${TAG_DEPLOYED_CONTAINERS_WITH}
+        TAG_BUILT_CONTAINERS_AS_LATEST: ${TAG_BUILT_CONTAINERS_AS_LATEST}
+        PIPELINE_CAN_REWRITE_ITSELF: true
+        PROMOTE_TO_ENVIRONMENT_NAME: ${PROMOTE_TO_ENVIRONMENT_NAME}
+        REGISTRY_BASE: ${REGISTRY_BASE}
+        REGISTRY_AWS_ACCOUNT_ID: ${REGISTRY_AWS_ACCOUNT_ID}
+        CLUSTER_HOST: ${CLUSTER_HOST}
+        CLUSTER_NAME: ${CLUSTER_NAME}
+      run:
+        path: bash
+        args:
+        - -o
+        - pipefail
+        - -c
+        - "${BRANCH_NAME}/${INCEPTION_PATH} render-pipeline | tee concourse/pipeline.yml"
+  - put: self
+    params:
+      pipelines:
+      - name: ${BRANCH_NAME}
+        team: main
+        config_file: concourse/pipeline.yml
+
+resources:
+- ((merge))
+- name: self
+  type: concourse-pipeline
+  icon: concourse-ci
+  source:
+    target: http://concourse.ci.svc.cluster.local:8080
+    teams:
+    - name: main
+      username: ((fly/username))
+      password: ((fly/password))

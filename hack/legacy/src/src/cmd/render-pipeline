@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Render a concourse pipeline that includes jobs for every eligible project.
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+LIB_PATH="${SCRIPT_PATH}/../lib"
+
+. ${LIB_PATH}/renderPipeline
+. ${LIB_PATH}/projectList
+
+function render-pipeline {
+  # render pipeline for project listing provided via newline separated stdin
+  if [[ ! -t 0 ]]; then
+    renderPipeline
+    exit 0
+  fi
+
+  # if project list not provided, use all projects under dev
+  projectList | while read project; do
+    if (PROJECT_PATH=${project} projectModel | getUnderDev); then
+      printf "${project}\n"
+    fi
+  done | renderPipeline
+}

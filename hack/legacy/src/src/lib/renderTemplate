@@ -1,0 +1,191 @@
+#!/usr/bin/env bash
+# These function are responsible for rendering user-supplied templates.
+set -ueo pipefail
+
+function renderTemplate {
+  # Make sure the env variables we need are defined.
+  : ${TEMPLATES_PATH?}
+  local context=$1
+  local templateName=$2
+  # Derive the template name from the global templates path.
+  local template=${TEMPLATES_PATH}/${templateName}
+  if [[ ! -f "${template}" ]]; then
+    printf "Unable to locate template ${template}.\n"
+    exit 1
+  fi
+  # Render the template to a file, constrained to the list of environment vars
+  # defined in "context".
+  envsubst "$(echo "\$${context}" | sed 's/ / \$/g')" < ${template}
+}
+
+function toTempFile {
+  # Create a temporary file to contain a rendered template.
+  local filename=$(mktemp)
+  cat - > $filename
+  # Output the path to the temporary file containing the result. This is used
+  # later by spruce to merge all rendered templates into one file.
+  echo $filename
+}
+
+function renderProjectDeployJob {
+  local context=(
+    BRANCH_NAME
+    BUILD_TRIGGERS_DEPLOY
+    CONFIGFILE_NAME
+    DEPLOYMENT_NAME
+    DEPLOY_REQUIRES_PASSING_JOB
+    CLUSTER_HOST
+    CLUSTER_NAME
+    ENVIRONMENT_NAME
+    INCEPTION_PATH
+    JOB_NAME
+    PROJECT_RESOURCE_NAME
+    PROJECT_NAME
+    PROJECT_MANIFEST_COMMAND
+    PROJECT_PATHS_BUILD
+    PROJECT_PATHS_DEPLOY
+    PROJECT_VERSION_COMMAND
+    PROJECT_IMAGE_NAME
+    PROJECTS_PATH
+    REGISTRY_BASE
+    TAG_DEPLOYED_CONTAINERS_WITH
+  )
+  renderTemplate "${context[*]}" project-deploy-job.yml
+}
+
+function renderEnvironmentDeployJob {
+  local context=(
+    BRANCH_NAME
+    DEPLOYMENT_NAME
+    CLUSTER_HOST
+    CLUSTER_NAME
+    ENVIRONMENT_NAME
+    INCEPTION_PATH
+    JOB_NAME
+    REGISTRY_BASE
+  )
+  renderTemplate "${context[*]}" environment-deploy-job.yml
+}
+
+function renderFanInJob {
+  local context=(
+    APPS_DEPLOYED
+    ENVIRONMENT_NAME
+    BRANCH_NAME
+    JOB_NAME
+    FAN_IN_ON
+    PROJECT_NAME
+    REGISTRY_BASE
+  )
+  renderTemplate "${context[*]}" fan-in-job.yml
+}
+
+function renderInceptionJob {
+  local context=(
+    BRANCH_NAME
+    CLUSTER_HOST
+    CLUSTER_NAME
+    DEPLOYMENT_NAME
+    STAGES_ENABLED
+    CACHING_ENABLED
+    ENVIRONMENT_NAME
+    INCEPTION_PATH
+    JOB_NAME
+    PROMOTE_TO_ENVIRONMENT_NAME
+    REGISTRY_BASE
+    REGISTRY_AWS_ACCOUNT_ID
+    TAG_BUILT_CONTAINERS_AS_LATEST
+    TAG_DEPLOYED_CONTAINERS_WITH
+  )
+  renderTemplate "${context[*]}" inception-job.yml
+}
+
+function renderProjectBuildJob {
+  local context=(
+    BRANCH_NAME
+    CI_IMAGE
+    CONFIGFILE_NAME
+    JOB_NAME
+    PROJECT_RESOURCE_NAME
+    PROJECT_CACHE_PATHS
+    PROJECT_BUILD_COMMAND
+    PROJECT_NAME
+    PROJECT_PATHS_BUILD
+    PROJECTS_PATH
+    PROJECT_IMAGE_NAME
+    REGISTRY_AWS_ACCOUNT_ID
+    REGISTRY_BASE
+    TAG_BUILT_CONTAINERS_AS_LATEST
+  )
+  renderTemplate "${context[*]}" project-build-job.yml
+}
+
+function renderProjectTestJob {
+  local context=(
+    BRANCH_NAME
+    CI_IMAGE
+    JOB_NAME
+    PROJECT_RESOURCE_NAME
+    PROJECT_CACHE_PATHS
+    PROJECT_TEST_COMMAND
+    PROJECT_NAME
+    PROJECT_PATHS_TEST
+    PROJECTS_PATH
+    REGISTRY_BASE
+  )
+  renderTemplate "${context[*]}" project-test-job.yml
+}
+
+function renderProjectIntegrationTestJob {
+  local context=(
+    BRANCH_NAME
+    CI_IMAGE
+    JOB_NAME
+    PROJECT_RESOURCE_NAME
+    PROJECT_CACHE_PATHS
+    PROJECT_ITEST_COMMAND
+    PROJECT_NAME
+    PROJECT_PATHS_BUILD
+    PROJECTS_PATH
+    REGISTRY_BASE
+  )
+  renderTemplate "${context[*]}" project-integration-test-job.yml
+}
+
+function renderPromoteTask {
+  local context=(
+    JOB_NAME
+    ENVIRONMENT_NAME
+    REGISTRY_BASE
+  )
+  renderTemplate "${context[*]}" promote-task.yml
+}
+
+function renderTask {
+  local context=(
+    BRANCH_NAME
+    CLUSTER_NAME
+    ENVIRONMENT_NAME
+    JOB_NAME
+    REGISTRY_BASE
+    TASK_NAME
+    TASKS_PATH
+  )
+  renderTemplate "${context[*]}" task.yml
+}
+
+function renderJobGroup {
+  local context=(
+    GROUP_NAME
+    JOB_NAME
+  )
+  renderTemplate "${context[*]}" job-group.yml
+}
+
+function renderShared {
+  local context=(
+    BRANCH_NAME
+    ALERT_CHANNEL
+  )
+  renderTemplate "${context[*]}" shared.yml
+}

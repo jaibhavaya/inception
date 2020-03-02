@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+set -ueo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+
+. ${SCRIPT_PATH}/projectModel
+. ${SCRIPT_PATH}/taskList
+. ${SCRIPT_PATH}/renderTemplate
+
+# Given a list of project directories on stdin, generate a single pipeline that
+# will build and deploy all projects (as needed) on stdout.
+function renderPipeline {
+  # Make sure the env variables we need are defined.
+  : ${TEMPLATES_PATH?} ${ENVIRONMENT_NAME?} ${DEPLOYMENT_NAME?} ${CACHING_ENABLED?} ${PIPELINE_CAN_REWRITE_ITSELF?} ${TAG_DEPLOYED_CONTAINERS_WITH?} ${TAG_BUILT_CONTAINERS_AS_LATEST?} ${STAGES_ENABLED?} ${BRANCH_NAME?} ${TASKS_PATH?} ${REGISTRY_BASE} ${REGISTRY_AWS_ACCOUNT_ID} ${CLUSTER_HOST} ${CLUSTER_NAME}
+
+  # Hold a json representation of the current project.
+  local currentProject
+
+  # An array to hold paths to ci yml snippets we want spruce to intelligently
+  # merge.
+  local pipelineParts=(
+    $(renderShared | toTempFile)
+  )
+
+  # An array to hold deploy job names for the purposes of building a fan-in
+  # job meant to run after they are successful.
+  local deployables=()
+
+  # Used by pipelines templates to find inception.
+  export INCEPTION_PATH=bin/inception
+
+  # Generate concourse jobs for all projects defined on stdin.
+  while read project; do
+    # Set project path to whatever path was needed to find project
+    export PROJECT_PATH=${project}
+
+    # Look up the current project using the project path above
+    currentProject=$(projectModel)
+
+    export PROJECT_NAME=$(getName <<<$currentProject)
+    export PROJECT_IMAGE_NAME=$(getProjectImageName <<<$currentProject)
+    export CI_IMAGE=$(getCiImageName <<<$currentProject)
+    export PROJECT_GROUPS=$(getGroups <<<$currentProject)
+    export PROJECT_RESOURCE_NAME="${PROJECT_NAME}-sources"
+    export PROJECT_PATHS_BUILD="[]"
+
+    # Transform cache paths from simple format to concourse compatible one
+    # only if caching is enabled for this pipeline.
+    if [[ ${CACHING_ENABLED} == "true" ]]; then
+      export PROJECT_CACHE_PATHS=$(getCachePaths <<<$currentProject | jq -rc 'map({"path": (env.PROJECT_RESOURCE_NAME + "/" + .)})')
+    else
+      export PROJECT_CACHE_PATHS="[]"
+    fi
+
+    # Only try to build / test if this stage is enabled.
+    if [[ ${STAGES_ENABLED} =~ build ]]; then
+      if getIntegrationTestable <<<$currentProject; then
+        export PROJECT_ITEST_COMMAND=$(getIntegrationTestCommand <<<$currentProject)
+        export JOB_NAME=integration-test-${PROJECT_NAME}
+        pipelineParts+=(
+          $(renderProjectIntegrationTestJob | toTempFile)
+          $(renderJobGroupsToTemp "${PROJECT_GROUPS}")
+        )
+      fi
+
+      # If this project is buildable, include build jobs.
+      export DEPLOY_REQUIRES_PASSING_JOB=""
+      export BUILD_TRIGGERS_DEPLOY="false"
+      if getBuildable <<<$currentProject; then
+        export JOB_NAME=build-${PROJECT_NAME}
+        export PROJECT_PATHS_BUILD=$(getBuildPaths <<<$currentProject)
+        export PROJECT_BUILD_COMMAND=$(getBuildCommand <<<$currentProject)
+        export BUILD_TRIGGERS_DEPLOY="true"
+        export DEPLOY_REQUIRES_PASSING_JOB="${JOB_NAME}"
+
+        # Render build job template to a file. Add the path to the rendered
+        # template to an array for spruce to merge at the end of this loop.
+        pipelineParts+=(
+          $(renderProjectBuildJob | toTempFile)
+          $(renderJobGroupsToTemp "${PROJECT_GROUPS}")
+        )
+      # If the project wasn't buildable, was it unit testable? If so, add a test
+      # only job.
+      elif getUnitTestable <<<$currentProject; then
+        export JOB_NAME=test-${PROJECT_NAME}
+        export PROJECT_PATHS_TEST=$(getTestPaths <<<$currentProject)
+        export PROJECT_TEST_COMMAND=$(getUnitTestCommand <<<$currentProject)
+        pipelineParts+=(
+          $(renderProjectTestJob | toTempFile)
+          $(renderJobGroupsToTemp "${PROJECT_GROUPS}")
+        )
+      fi
+    fi
+
+    # Only try to deploy if this stage is enabled.
+    if [[ ${STAGES_ENABLED} =~ deploy ]]; then
+      # If this project is deployable, include deploy jobs.
+      if getDeployable <<<$currentProject; then
+        export PROJECT_MANIFEST_COMMAND=$(getManifestCommand <<<$currentProject)
+        export PROJECT_VERSION_COMMAND=$(getVersionCommand <<<$currentProject)
+        export PROJECT_PATHS_DEPLOY=$(getDeployPaths <<<$currentProject)
+        export JOB_NAME=deploy-${PROJECT_NAME}
+
+        deployables+=(${PROJECT_NAME})
+        # Render deploy jobs template to a file. Add the file location to an array
+        # for spruce to merge at the end of this loop.
+        pipelineParts+=(
+          $(renderProjectDeployJob | toTempFile)
+          $(renderJobGroupsToTemp "${PROJECT_GROUPS}")
+        )
+      fi
+    fi
+  done
+
+  if [[ ${PIPELINE_CAN_REWRITE_ITSELF} == "true" ]]; then
+    export JOB_NAME="curate-pipeline"
+    pipelineParts+=(
+      $(renderInceptionJob | toTempFile)
+      $(renderJobGroupsToTemp "∞ tasks")
+    )
+  fi
+
+  export JOB_NAME="initialize-${DEPLOYMENT_NAME}-environment"
+  pipelineParts+=(
+    $(renderEnvironmentDeployJob | toTempFile)
+    $(renderJobGroupsToTemp "∞ tasks")
+  )
+
+  # In order to generate a job that validates the entire set of deployed apps
+  # we need to have their successful deployment mediate the running of it. This
+  # checks to see if the pipeline contains any deployable projects and then
+  # adds a testing job which can be used to run tests and ultimately produce
+  # an automated PR to promote the versions of the apps that passed our
+  # requirements.
+  if [[ ${#deployables[@]} != "0" ]]; then
+    export JOB_NAME="e2e-test"
+
+    # If we have a promotion destination, include the promotion task.
+    if [[ "${PROMOTE_TO_ENVIRONMENT_NAME:-""}" != "" ]]; then
+      # export JOB_NAME="promote"
+      pipelineParts+=(
+        $(renderPromoteTask | toTempFile)
+      )
+    fi
+
+    export FAN_IN_ON=$(echo ${deployables[*]} | tr -d '\n' | jq -rc --raw-input --slurp 'split(" ") | map(. | "deploy-" + .)')
+    export APPS_DEPLOYED=$(echo ${deployables[*]} | tr ' ' ',')
+    pipelineParts+=(
+      $(renderFanInJob | toTempFile)
+      $(renderJobGroupsToTemp "∞ tasks")
+    )
+  fi
+
+  # Add all tasks to tasks tab
+  while read task; do
+    export TASK_PATH=${TASKS_PATH}/${task}
+    export JOB_NAME=${task}
+    pipelineParts+=(
+      $(renderTask | toTempFile)
+      $(renderJobGroupsToTemp "∞ tasks")
+    )
+  done <<<$(taskList)
+
+  # Phew, merge everything together with spruce, sort the groups alphabetically, and we have a pipeline!
+  spruce merge ${pipelineParts[*]} | spruce json | jq '. * (.groups | sort_by(.name) | {groups:.})'
+}
+
+function renderJobGroupsToTemp {
+  local groups=$1
+  local parts=()
+  while read group; do
+    export GROUP_NAME=${group}
+    renderJobGroup | toTempFile
+  done <<<"${groups}"
+}

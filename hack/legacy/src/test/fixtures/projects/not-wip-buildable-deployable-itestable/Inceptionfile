@@ -1,0 +1,13 @@
+project:
+  name: not-wip-buildable-deployable-itestable
+  wip: false
+  groups:
+  - type3
+  commands:
+    build: make
+  triggers:
+    build:
+    - Dockerfile
+    - Makefile
+    deploy:
+    - infrastructure/*

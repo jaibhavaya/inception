@@ -1,0 +1,49 @@
+jobs:
+- name: ${JOB_NAME}
+  serial: true
+#  on_failure:
+#    put: slack-notify
+#    params:
+#      alert_type: failed
+  plan:
+  - get: ${PROJECT_RESOURCE_NAME}
+    trigger: true
+    passed:
+    - build-${PROJECT_NAME}
+  - task: run-integration-tests
+    config:
+      inputs:
+      - name: ${PROJECT_RESOURCE_NAME}
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/${CI_IMAGE}
+      caches: ${PROJECT_CACHE_PATHS}
+      params:
+        PROJECT_PATH: ${PROJECT_RESOURCE_NAME}/${PROJECTS_PATH}/${PROJECT_NAME}
+      run:
+        path: bash
+        args:
+        - --login
+        - -c
+        - |-
+            if [[ '${PROJECT_CACHE_PATHS}' != '[]' ]]; then
+              printf "cache status:\n"
+              jq -rn '${PROJECT_CACHE_PATHS}[].path'| while read cache; do
+                 printf "  \e[1;34m${cache}\e[0m: "
+                 test -z "$(ls -A ${cache} 2> /dev/null)" && echo miss || echo hit
+             done
+            fi
+            cd ${PROJECT_PATH} && ${PROJECT_ITEST_COMMAND}
+
+resources:
+- ((merge))
+- name: ${PROJECT_RESOURCE_NAME}
+  type: git
+  icon: git
+  source:
+    uri: ssh://((repo/username))@${REPO_URI}
+    private_key: ((repo/private_key))
+    branch: ${BRANCH_NAME}
+    paths: ${PROJECT_PATHS_BUILD}

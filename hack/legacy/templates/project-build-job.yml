@@ -1,0 +1,138 @@
+jobs:
+- name: ${JOB_NAME}
+  serial: true
+#  on_failure:
+#    put: slack-notify
+#    params:
+#      alert_type: failed
+  plan:
+  - get: ${PROJECT_RESOURCE_NAME}
+    trigger: true
+  - try:
+      task: build-skip-gate
+      config:
+        platform: linux
+        image_resource:
+          source:
+            repository: ${REGISTRY_BASE}/ci-ops
+          type: docker-image
+        inputs:
+        - name: ${PROJECT_RESOURCE_NAME}
+        outputs:
+        - name: build
+        params:
+          AWS_DEFAULT_REGION: us-east-1
+          REGISTRY_ID: ${REGISTRY_AWS_ACCOUNT_ID}
+          IMAGE: ${PROJECT_IMAGE_NAME}
+        run:
+          path: bash
+          # We run two ecr commands below to avoid even more unfortunate bash syntax that caused non-deterministic
+          # results when grepping the output of list images through a pipe. Instead we show output with list images for
+          # sanity and debugging purposes but do the actual logic of skip or continue based on an explicit request for
+          # the tag we care about.
+          args:
+          - -o
+          - pipefail
+          - -c
+          - |-
+              SHA=$(cat ${PROJECT_RESOURCE_NAME}/.git/ref)
+              SHA_BRIGHT=$(printf "\e[1;34m${SHA}\e[0m")
+              printf "reading build triggers in ${PROJECTS_PATH}/${PROJECT_NAME}/${CONFIGFILE_NAME}...\n"
+              printf '${PROJECT_PATHS_BUILD}' | jq
+              printf "last commit to change project build triggers: ${SHA_BRIGHT}"
+              printf "\nexisting container tags:\n"
+              aws ecr list-images \
+                --registry-id ${REGISTRY_ID} \
+                --repository ${IMAGE} \
+                --filter tagStatus=TAGGED \
+                --no-paginate \
+                | jq -re '.imageIds[].imageTag' \
+                | sed "s|${SHA}|${SHA_BRIGHT}|g"
+              aws ecr describe-images \
+                --registry-id ${REGISTRY_ID} \
+                --repository-name ${IMAGE} \
+                --image-ids imageTag=${SHA} 2>&1 > /dev/null \
+                && printf "\nFOUND: skipping build" || {
+                  echo -e "\nMISSING: running build"
+                  exit 1
+                }
+      on_failure:
+        do:
+        - task: ${JOB_NAME}
+          config:
+            platform: linux
+            image_resource:
+              type: docker-image
+              source:
+                repository: ${REGISTRY_BASE}/${CI_IMAGE}
+            inputs:
+            - name: ${PROJECT_RESOURCE_NAME}
+            outputs:
+            - name: build
+            params:
+              PROJECT_PATH: ${PROJECT_RESOURCE_NAME}/${PROJECTS_PATH}/${PROJECT_NAME}
+            caches: ${PROJECT_CACHE_PATHS}
+            run:
+              path: bash
+              args:
+              - -c
+              - |-
+                  if [[ '${PROJECT_CACHE_PATHS}' != '[]' ]]; then
+                    printf "cache status:\n"
+                    jq -rn '${PROJECT_CACHE_PATHS}[].path'| while read cache; do
+                       printf "  \e[1;34m${cache}\e[0m: "
+                       test -z "$(ls -A ${cache} 2> /dev/null)" && echo miss || echo hit
+                   done
+                  fi
+                  (cd ${PROJECT_PATH} && ${PROJECT_BUILD_COMMAND}) && cp -r ${PROJECT_PATH}/* build
+        - put: ${PROJECT_NAME}
+          inputs:
+          - ${PROJECT_RESOURCE_NAME}
+          - build
+          params:
+            build: build
+            tag_file: ${PROJECT_RESOURCE_NAME}/.git/ref
+            tag_as_latest: ${TAG_BUILT_CONTAINERS_AS_LATEST}
+            skip_download: true
+  - task: audit-container
+    config:
+      platform: linux
+      image_resource:
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+        type: docker-image
+      inputs:
+      - name: ${PROJECT_RESOURCE_NAME}
+      - name: build
+      params:
+        AWS_DEFAULT_REGION: us-east-1
+        REGISTRY_ID: ${REGISTRY_AWS_ACCOUNT_ID}
+        IMAGE: ${PROJECT_IMAGE_NAME}
+      run:
+        path: bash
+        args:
+        - -o
+        - pipefail
+        - -c
+        - |-
+            SHA=$(cat ${PROJECT_RESOURCE_NAME}/.git/ref)
+            MANIFEST=$(aws ecr batch-get-image --registry-id ${REGISTRY_ID} --repository-name "${IMAGE}" --image-ids imageTag="${SHA}")
+            printf "show sha tagged container manifest:\n"
+            echo $MANIFEST | jq -re '.images[0].imageManifest' | jq || { printf "ERROR/MISSING: assuming build or container push failed"; exit 1; }
+            aws ecr describe-image-scan-findings --registry-id ${REGISTRY_ID} --repository-name "${IMAGE}" --image-id imageTag="${SHA}" || true
+
+resources:
+- ((merge))
+- name: ${PROJECT_RESOURCE_NAME}
+  type: git
+  icon: git
+  source:
+    uri: ssh://((repo/username))@${REPO_URI}
+    private_key: ((repo/private_key))
+    branch: ${BRANCH_NAME}
+    paths: ${PROJECT_PATHS_BUILD}
+- name: ${PROJECT_NAME}
+  type: docker-image
+  icon: docker
+  source:
+    repository: ${REGISTRY_BASE}/${PROJECT_NAME}

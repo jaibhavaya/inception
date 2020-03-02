@@ -1,0 +1,5 @@
+jobs:
+- name: ${JOB_NAME}
+#  passed: ${FAN_IN_ON}
+  plan:
+  - ((prepend))

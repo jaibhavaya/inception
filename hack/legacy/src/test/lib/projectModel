@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+LIB_PATH="${SCRIPT_PATH}/../../src/lib"
+FIXTURES_PATH=${SCRIPT_PATH}/../fixtures
+
+. ${LIB_PATH}/projectModel
+
+# start projectModel testing
+function test:projectModel {
+  assert_status_code 1 projectModel "missing all config"
+  assert_status_code 1 projectModelMissingProjectPath "missing PROJECT_PATH"
+  assert_status_code 1 projectModelAbsentConfigFile "absent config file"
+  assert_status_code 0 projectModelValid "when config file is found"
+  assert_equals '{"project":{"commands":{"build":"make"},"name":"wip-buildable-only","triggers":{"build":["code/*","Dockerfile","Makefile"]},"wip":true}}' "$(projectModelValid)" "when config file is found"
+}
+
+function projectModelMissingProjectPath {
+  CONFIGFILE_NAME="Inceptionfile" projectModel
+}
+
+function projectModelAbsentConfigFile {
+  CONFIGFILE_NAME="Inceptionfile" PROJECT_PATH="badpath" projectModel
+}
+
+function projectModelValid {
+  CONFIGFILE_NAME="Inceptionfile" PROJECT_PATH="${FIXTURES_PATH}/projects/wip-buildable-only" projectModel | jq -cr
+}
+
+# start getIntegrationTestable testing
+function test:getIntegrationTestable {
+  # the exit codes here are inverted. 0 = true, 1 = false this is because shell
+  # exit codes consider non-zero to be a failure and our function is named such
+  # that affirmation means 0. sorry for the mind melting future someone.
+  assert_status_code 0 getIntegrationTestableWithItestCommand "when model is has itest command"
+  assert_status_code 1 getIntegrationTestableWithNoItestCommand "when model is has no build triggers"
+}
+
+function getIntegrationTestableWithNoItestCommand {
+  cat <<EOF | spruce json | getIntegrationTestable
+project:
+  commands:
+EOF
+}
+
+function getIntegrationTestableWithItestCommand {
+  cat <<EOF | spruce json | getIntegrationTestable
+project:
+  commands:
+    itest: make itest
+EOF
+}
+
+# start getBuildable testing
+function test:getBuildable {
+  # the exit codes here are inverted. 0 = true, 1 = false this is because shell
+  # exit codes consider non-zero to be a failure and our function is named such
+  # that affirmation means 0. sorry for the mind melting future someone.
+  assert_status_code 0 getBuildableWithBuildTriggers "when model is has build triggers"
+  assert_status_code 1 getBuildableWithNoBuildTriggers "when model is has no build triggers"
+}
+
+function getBuildableWithNoBuildTriggers {
+  cat <<EOF | spruce json | getBuildable
+project:
+EOF
+}
+
+function getBuildableWithBuildTriggers {
+  cat <<EOF | spruce json | getBuildable
+project:
+  triggers:
+    build:
+      - Makefile
+EOF
+}
+
+# start getDeployable testing
+function test:getDeployable {
+  # the exit codes here are inverted. 0 = true, 1 = false this is because shell
+  # exit codes consider non-zero to be a failure and our function is named such
+  # that affirmation means 0. sorry for the mind melting future someone.
+  assert_status_code 0 getDeployableWithDeployTriggers "when model is has deploy triggers"
+  assert_status_code 1 getDeployableWithNoDeployTriggers "when model is has no deploy triggers"
+}
+
+function getDeployableWithNoDeployTriggers {
+  cat <<EOF | spruce json | getDeployable
+project:
+EOF
+}
+
+function getDeployableWithDeployTriggers {
+  cat <<EOF | spruce json | getDeployable
+project:
+  triggers:
+    deploy:
+      - infrastructure/*
+EOF
+}
+
+# start getProjectImageName testing
+function test:getProjectImageName {
+  assert_status_code 1 getProjectImageNameWithNoName "when model is missing name"
+  assert_status_code 0 getProjectImageNameWithName "when model has name"
+  assert_equals "test" "$(getProjectImageNameWithName)" "when model has name"
+  assert_equals "prefix/test" "$(getProjectImageNameWithNameAndPrefix)" "when model has name and repository prefix"
+}
+
+function getProjectImageNameWithNoName {
+  cat <<EOF | spruce json | getProjectImageName
+project:
+EOF
+}
+
+function getProjectImageNameWithName {
+  cat <<EOF | spruce json | getProjectImageName
+project:
+  name: test
+EOF
+}
+
+function getProjectImageNameWithNameAndPrefix {
+  cat <<EOF | spruce json | getProjectImageName
+project:
+  name: test
+  repository:
+    prefix: prefix/
+EOF
+}
+
+# start getName testing
+function test:getName {
+  assert_status_code 1 getNameWithNoName "when model is missing name"
+  assert_status_code 0 getNameWithName "when model has name"
+  assert_equals "test" "$(getNameWithName)" "when model has name"
+}
+
+function getNameWithNoName {
+  cat <<EOF | spruce json | getName
+project:
+EOF
+}
+
+function getNameWithName {
+  cat <<EOF | spruce json | getName
+project:
+  name: test
+EOF
+}
+
+# start getCiImageName testing
+function test:getCiImageName {
+  assert_status_code 0 getCiImageNameWithNoImage "when model is missing image"
+  assert_status_code 0 getCiImageNameWithImage "when model has image"
+  assert_equals "ci-build" "$(getCiImageNameWithNoImage)" "when model is missing image"
+  assert_equals "test" "$(getCiImageNameWithImage)" "when model has image"
+}
+
+function getCiImageNameWithNoImage {
+  cat <<EOF | spruce json | getCiImageName
+project:
+EOF
+}
+
+function getCiImageNameWithImage {
+  cat <<EOF | spruce json | getCiImageName
+project:
+  image: test
+EOF
+}
+
+# start getCachePaths testing
+function test:getCachePaths {
+  assert_status_code 1 getCachePaths "missing PROJECT_PATH"
+  assert_status_code 0 getCachePathsWithoutCachePaths "does not error when there are no cache paths"
+  assert_equals "[]" "$(getCachePathsWithoutCachePaths)" "returns empty array when no cache paths"
+  assert_equals "[\"projects/test/../.gradle\",\"projects/test/envname/build\"]" "$(getCachePathsWithCachePaths)" "knows user specified paths and replaces environment variables"
+}
+
+function getCachePathsWithoutCachePaths {
+  cat <<EOF | spruce json | PROJECT_PATH="test" getCachePaths
+project:
+EOF
+}
+
+function getCachePathsWithCachePaths {
+  cat <<'EOF' | spruce json | ENVIRONMENT_NAME="envname" PROJECT_PATH="test" getCachePaths
+project:
+  caches:
+  - ../.gradle
+  - ${ENVIRONMENT_NAME}/build
+EOF
+}
+
+# start getBuildPaths testing
+function test:getBuildPaths {
+  assert_status_code 1 getBuildPaths "missing PROJECT_PATH"
+  assert_status_code 0 getBuildPathsNoBuildPaths "does not error when there are no build paths"
+  assert_equals "[]" "$(getBuildPathsNoBuildPaths)" "returns empty array when no build paths"
+  assert_equals "[\"projects/test/Makefile\",\"projects/test/envname\"]" "$(getBuildPathsWithBuildPaths)" "knows user specified paths and replaces environment variables"
+}
+
+function getBuildPathsNoBuildPaths {
+  cat <<EOF | spruce json | PROJECT_PATH="test" getBuildPaths
+project:
+EOF
+}
+
+function getBuildPathsWithBuildPaths {
+  cat <<'EOF' | spruce json | ENVIRONMENT_NAME="envname" PROJECT_PATH="test" getBuildPaths
+project:
+  triggers:
+    build:
+      - Makefile
+      - ${ENVIRONMENT_NAME}
+EOF
+}
+
+# start getDeployPaths testing
+function test:getDeployPaths {
+  assert_status_code 1 getDeployPaths "missing PROJECT_PATH"
+  assert_status_code 0 getDeployPathsNoDeployPaths "does not error when there are no deploy paths"
+  assert_equals "[]" "$(getDeployPathsNoDeployPaths)" "returns empty array when no deploy paths"
+  assert_equals "[\"projects/test/infrastructure/deployments/envname/*\"]" "$(getDeployPathsWithDeployPaths)" "knows user specified paths and replaces environment variables"
+}
+
+function getDeployPathsNoDeployPaths {
+  cat <<EOF | spruce json | PROJECT_PATH="test" getDeployPaths
+project:
+EOF
+}
+
+function getDeployPathsWithDeployPaths {
+  cat <<'EOF' | spruce json | DEPLOYMENT_NAME="envname" PROJECT_PATH="test" getDeployPaths
+project:
+  triggers:
+    deploy:
+      - infrastructure/deployments/${DEPLOYMENT_NAME}/*
+EOF
+}
+
+# start getUnderDev testing
+function test:getUnderDev {
+  # the exit codes here are inverted. 0 = true, 1 = false this is because shell
+  # exit codes consider non-zero to be a failure and our function is named such
+  # that affirmation means 0. sorry for the mind melting future someone.
+  assert_status_code 1 getUnderDevMissingConfig "missing all config"
+  assert_status_code 0 getUnderDevOnMaster "master branch is always under dev"
+  assert_status_code 0 getUnderDevWhenUnderDev "when manifest is present and wip is true or present"
+  assert_status_code 1 getUnderDevNotUnderDev "when manifest is present and wip is false or missing"
+}
+
+function getUnderDevMissingConfig {
+  getUnderDev
+}
+
+function getUnderDevOnMaster {
+  cat <<EOF | spruce json | BRANCH_NAME=master getUnderDev
+project:
+EOF
+}
+
+function getUnderDevWhenUnderDev {
+  cat <<EOF | spruce json | BRANCH_NAME=mybranch getUnderDev
+project:
+  wip: true
+EOF
+}
+
+function getUnderDevNotUnderDev {
+  cat <<EOF | spruce json | BRANCH_NAME=mybranch getUnderDev
+project:
+  wip: false
+EOF
+}

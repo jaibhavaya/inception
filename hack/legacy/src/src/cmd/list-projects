@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# list projects inception is aware of
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+LIB_PATH="${SCRIPT_PATH}/../lib"
+
+. ${LIB_PATH}/projectList
+. ${LIB_PATH}/utils
+
+function list-projects {
+  projectList | while read project; do relpath "${PWD}" "${project}"; done
+}

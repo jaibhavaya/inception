@@ -1,0 +1,16 @@
+project:
+  name: ci-inception
+  wip: false
+  repository:
+    host: 286694495060.dkr.ecr.us-east-1.amazonaws.com
+    prefix: abg-geneva/
+  groups:
+  - ci
+  image: ci-ops
+  commands:
+    test: make test
+  triggers:
+    test:
+    - src/*
+    - test/*
+    - Makefile

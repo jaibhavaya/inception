@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# This introspects a defined folder, locating all projects that are eligible for
+# automated management (by the presence of a configuration file).
+set -ueo pipefail
+
+function projectList {
+  # Make sure the env variables we need are defined.
+  : ${ROOT_PATH} ${PROJECTS_PATH?} ${CONFIGFILE_NAME?}
+  find ${ROOT_PATH}/${PROJECTS_PATH} -mindepth 2 -maxdepth 2 -name ${CONFIGFILE_NAME} -exec dirname {} \;
+}

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -ueo pipefail
+
+function assertStdin {
+  if [[ -t 0 ]]; then
+    >&2 echo expected $EXPECTED on stdin.
+    exit 1
+  fi
+  cat -
+}
+
+function functionList {
+  declare -F | cut -d" " -f3
+}
+
+function relpath {
+  s=$(cd ${1%%/};pwd); d=$(cd $2;pwd); while [ "${d#$s/}" == "${d}" ]
+  do s=$(dirname $s);b="../${b:-}"; done; echo ${b:-}${d#$s/}
+}

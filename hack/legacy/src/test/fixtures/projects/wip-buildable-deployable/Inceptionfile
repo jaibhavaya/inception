@@ -1,0 +1,13 @@
+project:
+  name: wip-buildable-deployable
+  wip: true
+  groups:
+  - type3
+  commands:
+    build: make
+  triggers:
+    build:
+    - Dockerfile
+    - Makefile
+    deploy:
+    - infrastructure/*

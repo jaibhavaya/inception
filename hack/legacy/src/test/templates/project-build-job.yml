@@ -1,0 +1,7 @@
+jobs:
+- name: ${JOB_NAME}
+  caches: ${PROJECT_CACHE_PATHS}
+  serial: true
+  plan:
+  - get: ${PROJECT_RESOURCE_NAME}
+    trigger: true

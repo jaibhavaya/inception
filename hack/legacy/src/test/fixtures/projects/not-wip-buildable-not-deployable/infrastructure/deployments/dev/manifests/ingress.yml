@@ -1,0 +1,9 @@
+apiVersion: getambassador.io/v1
+kind: Mapping
+metadata:
+  name: type1-app1
+spec:
+  prefix: /
+  service: type1-app1.$(ConfigMap.environment.metadata.namespace):8080
+  host: test.host
+  bypass_auth: true

@@ -1,0 +1,10 @@
+project:
+  name: wip-buildable-only
+  wip: true
+  commands:
+    build: make
+  triggers:
+    build:
+    - code/*
+    - Dockerfile
+    - Makefile

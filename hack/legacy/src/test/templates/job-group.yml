@@ -1,0 +1,5 @@
+groups:
+- name: ${GROUP_NAME}
+  jobs:
+  - ((append))
+  - ${JOB_NAME}

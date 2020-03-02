@@ -1,0 +1,19 @@
+jobs:
+- name: ${JOB_NAME}
+#  on_failure:
+#    put: slack-notify
+#    params:
+#      alert_type: failed
+  plan:
+  - task: generate-promotion-pull-request
+    config:
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+      run:
+        path: bash
+        args:
+        - -c
+        - echo "magic for ${ENVIRONMENT_NAME}"

@@ -1,0 +1,31 @@
+jobs:
+- ((append))
+- name: ${JOB_NAME}
+#  on_failure:
+#    put: slack-notify
+#    params:
+#      alert_type: failed
+  plan:
+  - get: ${BRANCH_NAME}
+    trigger: false
+  - task: execute
+    config:
+      inputs:
+      - name: ${BRANCH_NAME}
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+      params:
+        NAMESPACE: ${BRANCH_NAME}
+        ENVIRONMENT_NAME: ${ENVIRONMENT_NAME}
+        FLY_USERNAME: ((fly/username))
+        FLY_PASSWORD: ((fly/password))
+        CLUSTER_NAME: ${CLUSTER_NAME}
+        AWS_DEFAULT_REGION: us-east-1 # TODO: put in secrets store so we can pull it out
+      run:
+        path: ${BRANCH_NAME}/${TASKS_PATH}/${JOB_NAME}
+
+resources:
+- ((merge))

@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+SCRIPT_PATH="$(cd "$(dirname "$BASH_SOURCE[0]")"; pwd -P)"
+LANG=${LANG:-} ${SCRIPT_PATH}/bash_unit ${SCRIPT_PATH}/lib/*
+LANG=${LANG:-} ${SCRIPT_PATH}/bash_unit ${SCRIPT_PATH}/cmd/*

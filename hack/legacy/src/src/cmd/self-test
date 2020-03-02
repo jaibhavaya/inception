@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run a self test.
+set -euo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+
+function self-test {
+  env -i PATH=${PATH} LANG=${LANG:-} ${SCRIPT_PATH}/../../test/suite
+}

@@ -1,0 +1,62 @@
+jobs:
+- name: ${JOB_NAME}
+  on_failure:
+    put: slack-notify
+    params:
+      alert_type: failed
+  plan:
+  - in_parallel:
+    - get: shared-deployments # this is here purely to trigger redeployment of
+      trigger: true           # the shared environment when relevant files
+                                # change.
+    - get: ${BRANCH_NAME}
+  - task: render-manifest projects/shared/deployments/${DEPLOYMENT_NAME}
+    config:
+      inputs:
+      - name: ${BRANCH_NAME}
+      outputs:
+      - name: manifest
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+      params:
+        BRANCH_NAME: ${BRANCH_NAME}
+      run:
+        path: bash
+        args:
+        - -o
+        - pipefail
+        - -c
+        - (cd ${BRANCH_NAME} && bin/render-manifest projects/shared/deployments/${DEPLOYMENT_NAME}) | tee manifest/resources.yml
+  - put: ${ENVIRONMENT_NAME}-cluster
+    params:
+      kubectl: apply -f manifest/resources.yml
+      wait_until_ready: 0
+
+resources:
+- ((merge))
+- name: shared-deployments
+  type: git
+  icon: git
+  source:
+    uri: ssh://((repo/username))@${REPO_URI}
+    private_key: "((repo/private_key))"
+    branch: ${BRANCH_NAME}
+    # TODO: this needs to be a variable of some kind?
+    paths:
+    - bin/render-manifest
+    - projects/ci-inception/*
+    - shared/concourse/*
+    - projects/shared/kubernetes/*
+    - projects/shared/deployments/${DEPLOYMENT_NAME}/*
+    - projects/shared/monitoring/*
+- name: ${ENVIRONMENT_NAME}-cluster
+  type: kubernetes
+  icon: ship-wheel
+  source:
+    aws_eks_cluster_name: ${CLUSTER_NAME}
+    certificate_authority: ((eks/ca))
+    server: ${CLUSTER_HOST}
+    use_aws_iam_authenticator: true

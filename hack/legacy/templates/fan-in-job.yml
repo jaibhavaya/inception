@@ -1,0 +1,76 @@
+jobs:
+- name: ${JOB_NAME}
+  serial: true
+  #  on_failure:
+  #    put: slack-notify
+  #    params:
+  #      alert_type: failed
+  plan:
+  - ((prepend))
+  - in_parallel:
+    - get: ${BRANCH_NAME}
+# pending https://github.com/concourse/concourse/issues/4949
+#      passed: ${FAN_IN_ON}
+    - get: every-ten-minutes
+      trigger: true
+  - task: ${BRANCH_NAME}-e2e-build
+    config:
+      inputs:
+        - name: ${BRANCH_NAME}
+      outputs:
+        - name: ${BRANCH_NAME}-e2e-build
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-build
+      caches:
+      - path: ${BRANCH_NAME}/projects/.gradle
+      - path: ${BRANCH_NAME}/projects/shared/e2e-automation/build
+      - path: ${BRANCH_NAME}/projects/shared/components/java/connected-car-common/build
+      run:
+        path: bash
+        args:
+          - -o
+          - pipefail
+          - -c
+          - |-
+              printf "cache status:\n"
+              printf "  \e[1;34m${BRANCH_NAME}/projects/.gradle\e[0m: "
+              test -z "$(ls -A ${BRANCH_NAME}/projects/.gradle 2> /dev/null)" && echo miss || echo hit
+              printf "  \e[1;34m${BRANCH_NAME}/projects/shared/e2e-automation/build\e[0m: "
+              test -z "$(ls -A ${BRANCH_NAME}/projects/shared/e2e-automation/build 2> /dev/null)" && echo miss || echo hit
+              printf "  \e[1;34m${BRANCH_NAME}/projects/shared/components/java/connected-car-common/build\e[0m: "
+              test -z "$(ls -A ${BRANCH_NAME}/projects/shared/components/java/connected-car-common/build 2> /dev/null)" && echo miss || echo hit
+              printf "building and testing end-to-end automation... \n"
+              (cd ${BRANCH_NAME}/projects && ./gradlew :e2e-automation:build -x generateGitProperties)
+              cp -r ${BRANCH_NAME}/projects/shared/e2e-automation/build/* ${BRANCH_NAME}-e2e-build
+  - task: end-to-end-tests
+    config:
+      inputs:
+        - name: ${BRANCH_NAME}-e2e-build
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-build
+      params:
+        APPS: ${APPS_DEPLOYED}
+        NAMESPACE: ${BRANCH_NAME}
+        ENVIRONMENT_NAME: ${ENVIRONMENT_NAME}
+      run:
+        path: bash
+        args:
+          - -o
+          - pipefail
+          - -c
+          - |-
+              printf "run eligible tests in \e[1;34m${ENVIRONMENT_NAME}\e[0m with \e[1;34m${APPS}\e[0m in namespace \e[1;34m${NAMESPACE}\e[0m\n"
+              java -jar ${BRANCH_NAME}-e2e-build/libs/e2e-automation.jar
+
+resources:
+- ((merge))
+- name: every-ten-minutes
+  type: time
+  source:
+    interval: 10m

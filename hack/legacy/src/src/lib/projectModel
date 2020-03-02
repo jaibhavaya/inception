@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# These functions are designed to provide a class-like interface to project
+# configuration files.
+set -ueo pipefail
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")"; pwd -P)"
+
+. ${SCRIPT_PATH}/utils
+
+# Find a configuration file for the defined PROJECT_PATH.
+# Output a json representation on stdout.
+function projectModel {
+  # Make sure the env variables we need are defined.
+  : ${PROJECT_PATH?} ${CONFIGFILE_NAME?}
+
+  # Try to find our configuration file and bail if it isn't there.
+  CONFIG_PATH=${PROJECT_PATH}/${CONFIGFILE_NAME}
+  if [[ ! -f ${CONFIG_PATH} ]]; then
+    >&2 echo "ERROR: ${CONFIG_PATH} not found."
+    return 1
+  fi
+
+  # Output configuration file in json format so we can use jq to introspect it.
+  spruce json ${CONFIG_PATH}
+}
+
+function expectModel {
+  EXPECTED="valid json project model" assertStdin
+}
+
+# Return true if project has defined any build triggers.
+function getBuildable {
+  [[ "$(expectModel | jq -r '.project.triggers.build | length')" -ne "0" ]]
+}
+
+# Return true if project has defined test triggers.
+function getUnitTestable {
+  [[ "$(expectModel | jq -r '.project.triggers.test | length')" -ne "0" ]]
+}
+
+# Return true if project has defined an itest command.
+function getIntegrationTestable {
+  expectModel | jq -re '.project.commands.itest' > /dev/null
+}
+
+# Return true if project has defined any deploy triggers.
+function getDeployable {
+  [[ "$(expectModel | jq -r '.project.triggers.deploy | length')" -ne "0" ]]
+}
+
+# Get project name (this is a useless comment to satisfy consistency).
+function getName {
+  expectModel | jq -re '.project.name'
+}
+
+# Get space separated list of project groups
+function getGroups {
+  expectModel | jq '(.project.groups // [])[]'
+}
+
+# Get project build command (this is a useless comment to satisfy consistency).
+function getBuildCommand {
+  expectModel | jq -re '.project.commands.build'
+}
+
+# Get project integration test command (this is a useless comment to satisfy consistency).
+function getIntegrationTestCommand {
+  expectModel | jq -re '.project.commands.itest'
+}
+
+# Get project unit test command (this is a useless comment to satisfy consistency).
+function getUnitTestCommand {
+  expectModel | jq -re '.project.commands.test'
+}
+
+# Get project version command (this is a useless comment to satisfy consistency).
+function getVersionCommand {
+  expectModel | jq -re '.project.commands.version'
+}
+
+# Get project manifest command (this is a useless comment to satisfy consistency).
+function getManifestCommand {
+  expectModel | jq -re '.project.commands.manifest'
+}
+
+# Get ci image (this is a useless comment to satisfy consistency).
+function getCiImageName {
+  image=$(expectModel | jq -re '.project.image'); err=$?
+  if [[ $err -ne 0 ]]; then
+    printf "ci-build"
+    return 0
+  fi
+  printf "${image}"
+}
+
+function getProjectImageName {
+  expectModel | jq -re 'if (.project | has("name")) then ((.project.repository.prefix // "") + .project.name) else "" | halt_error(1) end'
+}
+
+# Get all paths that should be cached between builds when caching is enabled.
+# Replace any shell variables using envsubst.
+function getCachePaths {
+  # Make sure the env variables we need are defined.
+  : ${PROJECT_PATH?}
+  export PROJECT_FOLDER=$(basename $PROJECT_PATH)
+  expectModel | jq -rc '[] + .project.caches | map("projects/" + env.PROJECT_FOLDER + "/" + .)' | envsubst
+}
+
+# Get all paths that should trigger a build. Replace any shell variables using
+# envsubst.
+function getBuildPaths {
+  # Make sure the env variables we need are defined.
+  : ${PROJECT_PATH?}
+  export PROJECT_FOLDER=$(basename $PROJECT_PATH)
+  expectModel | jq -rc '[] + .project.triggers.build | map("projects/" + env.PROJECT_FOLDER + "/" + .)' | envsubst
+}
+
+# Get all paths that should trigger tests. Replace any shell variables using
+# envsubst.
+function getTestPaths {
+  : ${PROJECT_PATH?}
+  export PROJECT_FOLDER=$(basename $PROJECT_PATH)
+  expectModel | jq -rc '[] + .project.triggers.test | map("projects/" + env.PROJECT_FOLDER + "/" + .)' | envsubst
+}
+
+# Get all paths that should trigger a deploy. Replace any shell variables using
+# envsubst.
+function getDeployPaths {
+  : ${PROJECT_PATH?}
+  export PROJECT_FOLDER=$(basename $PROJECT_PATH)
+  expectModel | jq -rc '[] + .project.triggers.deploy | map("projects/" + env.PROJECT_FOLDER + "/" + .)' | envsubst
+}
+
+function getUnderDev {
+  # Make sure the env variables we need are defined.
+  : ${BRANCH_NAME?}
+  local wipState=$(expectModel | jq -re '.project.wip')
+  [[ "$BRANCH_NAME" == "master" ]] || [[ "$wipState" == "true" ]]
+}
+
+# Make functions available to subprocesses
+export -f projectModel getBuildable getDeployable getName getCiImageName getProjectImageName getBuildPaths getDeployPaths getUnderDev

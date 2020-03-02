@@ -1,0 +1,4 @@
+jobs:
+- name: ${JOB_NAME}
+  plan:
+  - task: generate-promotion-pull-request

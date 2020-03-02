@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_PATH="$(cd "$(dirname "$0")"; pwd -P)"
+CMD_PATH="${SCRIPT_PATH}/cmd"
+
+# Default configfile name to Inceptionfile.
+export CONFIGFILE_NAME=${CONFIGFILE_NAME:-"Inceptionfile"}
+
+# Ensure needed environment variables are present
+# TODO: expand these to error out with more meaningful messages about what
+# the values should be.
+: ${ROOT_PATH?} ${PROJECTS_PATH?} ${TASKS_PATH?} ${TEMPLATES_PATH?}
+
+# Default branch name to the currently checked out branch.
+export BRANCH_NAME=${BRANCH_NAME:-$(cd $SCRIPT_PATH && git branch | grep \* | cut -d ' ' -f2)}
+
+# See if first argument matches a file in the `cmd` directory. If it does,
+# source the file and run the command.
+COMMAND=${CMD_PATH}/${1-""}
+if [[ -f ${COMMAND} ]]; then
+  . ${COMMAND}
+  ${@:1}
+else
+  >&2 echo "Please specify a valid command:"
+  find ${CMD_PATH} -type f -exec basename {} \; | sed 's/^/  /' | sort
+  exit 1
+fi

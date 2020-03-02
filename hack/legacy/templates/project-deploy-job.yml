@@ -1,0 +1,79 @@
+jobs:
+- name: ${JOB_NAME}
+#  on_failure:
+#    put: slack-notify
+#    params:
+#      alert_type: failed
+  plan:
+  - in_parallel:
+    - get: ${PROJECT_RESOURCE_NAME}            # used to trigger a deploy after a
+      passed: [${DEPLOY_REQUIRES_PASSING_JOB}] # build. without this we would only
+      trigger: ${BUILD_TRIGGERS_DEPLOY}        # deploy on config changes.
+
+    - get: ${PROJECT_NAME}-${DEPLOYMENT_NAME} # used to trigger a deploy when
+      trigger: true                           # files affecting config change
+
+    - get: ${BRANCH_NAME} # this is the branch at whatever the latest commit is.
+                          # we run our commands from here to ensure we're always
+                          # using the latest deployment code. NOTE: this can
+                          # create a race condition rarely. re-running the build
+                          # will fix.
+
+  - task: render-${PROJECT_NAME}-${DEPLOYMENT_NAME}-manifest
+    config:
+      inputs:
+      - name: ${BRANCH_NAME}
+      outputs:
+      - name: manifest
+      platform: linux
+      image_resource:
+        type: docker-image
+        source:
+          repository: ${REGISTRY_BASE}/ci-ops
+      params:
+        BRANCH_NAME: ${BRANCH_NAME}
+        DEPLOYMENT_NAME: ${DEPLOYMENT_NAME}
+      run:
+        path: bash
+        args:
+        - -o
+        - pipefail
+        - -c
+        - |-
+            (
+              export PATH=${PATH}:${PWD}/${BRANCH_NAME}/bin
+              cd ${BRANCH_NAME}/${PROJECTS_PATH}/${PROJECT_NAME}
+              [[ "${TAG_DEPLOYED_CONTAINERS_WITH}" == "latest-build" ]] && export TAG=$(${PROJECT_VERSION_COMMAND}) || true
+              ${PROJECT_MANIFEST_COMMAND}
+            ) | tee manifest/resources.yml
+  - put: ${ENVIRONMENT_NAME}-cluster
+    params:
+      kubectl: apply -f manifest/resources.yml
+      wait_until_ready: 0
+
+resources:
+- ((merge))
+- name: ${PROJECT_RESOURCE_NAME}
+  type: git
+  icon: git
+  source:
+    uri: ssh://((repo/username))@${REPO_URI}
+    private_key: ((repo/private_key))
+    branch: ${BRANCH_NAME}
+    paths: ${PROJECT_PATHS_BUILD}
+- name: ${PROJECT_NAME}-${DEPLOYMENT_NAME}
+  type: git
+  icon: git
+  source:
+    uri: ssh://((repo/username))@${REPO_URI}
+    private_key: ((repo/private_key))
+    branch: ${BRANCH_NAME}
+    paths: ${PROJECT_PATHS_DEPLOY}
+- name: ${ENVIRONMENT_NAME}-cluster
+  type: kubernetes
+  icon: ship-wheel
+  source:
+    aws_eks_cluster_name: ${CLUSTER_NAME}
+    certificate_authority: ((eks/ca))
+    server: ${CLUSTER_HOST}
+    use_aws_iam_authenticator: true
