@@ -11,7 +11,7 @@ func TestMerge(t *testing.T) {
 		want    []byte
 		wantErr error
 	}{
-		"merge-and-prepend-hint": {
+		"merge-append-and-prepend-hint": {
 			[][]byte{
 				[]byte("key: value\narr:\n- initial"),
 				[]byte("otherKey: value\narr:\n- (( prepend ))\n- top"),
